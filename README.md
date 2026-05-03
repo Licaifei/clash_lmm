@@ -53,3 +53,26 @@ HarmonyOS App <--HTTP/WS--> Mihomo External Controller <--> Mihomo Core
 ## Migration
 
 This project was migrated from `harmonyos/` subdirectory. See `harmonyos/README.md` for the original scaffold documentation.
+
+## Test Files
+
+```
+entry/src/test/
+  MihomoModels.test.ets           # Interface structure tests
+  MihomoApiService.test.ets        # calcuProxies logic tests
+  AppConfigStore.test.ets          # Settings interface tests
+  ComponentsImport.test.ets        # Component import verification
+```
+
+Run tests with: `hvigor test` (device/emulator required)
+
+## Commit History
+
+1. `feat(models)`: Mihomo data models + tests
+2. `feat(api)`: Mihomo HTTP API service + calcuProxies tests
+3. `feat(ws)`: Mihomo WebSocket service
+4. `feat(config)`: AppConfigStore persistence + tests
+5. `feat(ui)`: BasePage + StatusCard components + tests
+6. `feat(ui)`: Index page with full Mihomo Verge UI
+7. `feat(config)`: INTERNET permission + app metadata
+8. `docs`: README update
