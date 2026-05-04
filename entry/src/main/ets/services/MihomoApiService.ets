@@ -7,13 +7,18 @@ import {
   MihomoBaseConfig,
   MihomoVersion,
   ProxiesResponse,
+  ProxyGroupItem,
   ProxyItem,
   ProxyProviderItem,
   ProxyProvidersResponse,
   RulesResponse
 } from '../models/MihomoModels';
 
-type JsonValue = Record<string, Object | string | number | boolean | null> | string | null;
+type JsonPayload = Object | string | null;
+
+interface SelectNodePayload {
+  name: string;
+}
 
 export class MihomoApiError extends Error {
   public statusCode: number;
@@ -54,7 +59,7 @@ export class MihomoApiService {
     };
   }
 
-  async patchBaseConfig(payload: Record<string, Object | string | number | boolean>): Promise<void> {
+  async patchBaseConfig(payload: Object): Promise<void> {
     await this.request<void>('PATCH', '/configs', payload);
   }
 
@@ -83,7 +88,8 @@ export class MihomoApiService {
   }
 
   async selectNodeForGroup(groupName: string, proxyName: string): Promise<void> {
-    await this.request<void>('PUT', `/proxies/${encodeURIComponent(groupName)}`, { name: proxyName });
+    const payload: SelectNodePayload = { name: proxyName };
+    await this.request<void>('PUT', `/proxies/${encodeURIComponent(groupName)}`, payload);
   }
 
   async delayProxyByName(name: string, url: string, timeout: number): Promise<DelayResponse> {
@@ -100,67 +106,204 @@ export class MihomoApiService {
   }
 
   async calcuProxies(): Promise<CalculatedProxies> {
-    const [proxyResponse, providerResponse] = await Promise.all([
+    const responses = await Promise.all([
       this.getProxies(),
       this.getProxyProviders()
     ]);
-    const proxyRecord = proxyResponse.proxies ?? {};
+    const proxyResponse = responses[0] as ProxiesResponse;
+    const providerResponse = responses[1] as ProxyProvidersResponse;
+    const proxyRecord = proxyResponse.proxies;
     const providerMap: Record<string, ProxyItem> = {};
 
-    Object.keys(providerResponse.providers ?? {}).forEach((providerName: string) => {
+    Object.keys(providerResponse.providers).forEach((providerName: string): void => {
       const provider = providerResponse.providers[providerName] as ProxyProviderItem;
-      (provider.proxies ?? []).forEach((proxy: ProxyItem) => {
-        providerMap[proxy.name] = Object.assign({}, proxy, { provider: providerName });
+      provider.proxies.forEach((proxy: ProxyItem): void => {
+        providerMap[proxy.name] = this.cloneProxy(proxy, providerName);
       });
     });
-
-    const generateItem = (name: string): ProxyItem => {
-      if (proxyRecord[name]) {
-        return proxyRecord[name];
-      }
-      if (providerMap[name]) {
-        return providerMap[name];
-      }
-      return { name, type: 'unknown', udp: false, xudp: false, tfo: false, mptcp: false, smux: false, history: [] };
-    };
 
     const global = proxyRecord['GLOBAL'];
     const direct = proxyRecord['DIRECT'];
     const reject = proxyRecord['REJECT'];
-    let groups = Object.keys(proxyRecord)
-      .map((name: string) => proxyRecord[name])
-      .filter((proxy: ProxyItem) => proxy.name !== 'GLOBAL' && !!proxy.all && proxy.all.length > 0)
-      .map((proxy: ProxyItem) => Object.assign({}, proxy, {
-        all: (proxy.all ?? []).map((name: string) => generateItem(name))
-      }));
+    const groups: ProxyGroupItem[] = [];
+    const proxyNames = Object.keys(proxyRecord);
 
+    proxyNames.forEach((name: string): void => {
+      const proxy = proxyRecord[name];
+      if (proxy.name !== 'GLOBAL' && this.hasGroupChildren(proxy)) {
+        groups.push(this.toGroupItem(proxy, proxyRecord, providerMap));
+      }
+    });
+
+    let finalGroups = groups;
     if (global && global.all) {
-      const globalGroups = global.all
-        .map((name: string) => proxyRecord[name])
-        .filter((proxy: ProxyItem | undefined) => !!proxy && !!proxy.all && proxy.all.length > 0)
-        .map((proxy: ProxyItem) => Object.assign({}, proxy, {
-          all: (proxy.all ?? []).map((name: string) => generateItem(name))
-        }));
-      const globalGroupNames = new Set<string>(globalGroups.map((group: ProxyItem) => group.name));
-      groups = groups.filter((group: ProxyItem) => !globalGroupNames.has(group.name)).concat(globalGroups);
+      const globalGroups: ProxyGroupItem[] = [];
+      const globalGroupNames: Record<string, boolean> = {};
+      global.all.forEach((name: string): void => {
+        const proxy = proxyRecord[name];
+        if (proxy && this.hasGroupChildren(proxy)) {
+          globalGroups.push(this.toGroupItem(proxy, proxyRecord, providerMap));
+          globalGroupNames[proxy.name] = true;
+        }
+      });
+      finalGroups = [];
+      groups.forEach((group: ProxyGroupItem): void => {
+        if (!globalGroupNames[group.name]) {
+          finalGroups.push(group);
+        }
+      });
+      finalGroups = finalGroups.concat(globalGroups);
     }
 
-    const proxies = [direct, reject]
-      .concat(Object.keys(proxyRecord)
-        .map((name: string) => proxyRecord[name])
-        .filter((proxy: ProxyItem) => !proxy.all?.length && proxy.name !== 'DIRECT' && proxy.name !== 'REJECT'))
-      .filter((proxy?: ProxyItem) => !!proxy) as ProxyItem[];
+    const proxies: ProxyItem[] = [];
+    if (direct) {
+      proxies.push(direct);
+    }
+    if (reject) {
+      proxies.push(reject);
+    }
+    proxyNames.forEach((name: string): void => {
+      const proxy = proxyRecord[name];
+      if (!this.hasGroupChildren(proxy) && proxy.name !== 'DIRECT' && proxy.name !== 'REJECT') {
+        proxies.push(proxy);
+      }
+    });
 
-    return {
-      global: global ? Object.assign({}, global, { all: (global.all ?? []).map((name: string) => generateItem(name)) }) : undefined,
-      direct,
-      groups,
+    const result: CalculatedProxies = {
+      groups: finalGroups,
       records: proxyRecord,
       proxies
     };
+    if (global) {
+      result.global = this.toGroupItem(global, proxyRecord, providerMap);
+    }
+    if (direct) {
+      result.direct = direct;
+    }
+    return result;
   }
 
-  private async request<T>(method: string, path: string, body: JsonValue = null): Promise<T> {
+  private cloneProxy(proxy: ProxyItem, provider?: string): ProxyItem {
+    const cloned: ProxyItem = {
+      name: proxy.name,
+      type: proxy.type
+    };
+    if (proxy.udp !== undefined) {
+      cloned.udp = proxy.udp;
+    }
+    if (proxy.xudp !== undefined) {
+      cloned.xudp = proxy.xudp;
+    }
+    if (proxy.tfo !== undefined) {
+      cloned.tfo = proxy.tfo;
+    }
+    if (proxy.mptcp !== undefined) {
+      cloned.mptcp = proxy.mptcp;
+    }
+    if (proxy.smux !== undefined) {
+      cloned.smux = proxy.smux;
+    }
+    if (proxy.history !== undefined) {
+      cloned.history = proxy.history;
+    }
+    if (proxy.all !== undefined) {
+      cloned.all = proxy.all;
+    }
+    if (proxy.now !== undefined) {
+      cloned.now = proxy.now;
+    }
+    if (proxy.hidden !== undefined) {
+      cloned.hidden = proxy.hidden;
+    }
+    if (proxy.icon !== undefined) {
+      cloned.icon = proxy.icon;
+    }
+    if (provider !== undefined) {
+      cloned.provider = provider;
+    } else if (proxy.provider !== undefined) {
+      cloned.provider = proxy.provider;
+    }
+    return cloned;
+  }
+
+  private toGroupItem(
+    proxy: ProxyItem,
+    records: Record<string, ProxyItem>,
+    providerMap: Record<string, ProxyItem>
+  ): ProxyGroupItem {
+    const children: ProxyItem[] = [];
+    if (proxy.all !== undefined) {
+      proxy.all.forEach((name: string): void => {
+        children.push(this.resolveProxyItem(name, records, providerMap));
+      });
+    }
+    const group: ProxyGroupItem = {
+      name: proxy.name,
+      type: proxy.type,
+      all: children
+    };
+    if (proxy.udp !== undefined) {
+      group.udp = proxy.udp;
+    }
+    if (proxy.xudp !== undefined) {
+      group.xudp = proxy.xudp;
+    }
+    if (proxy.tfo !== undefined) {
+      group.tfo = proxy.tfo;
+    }
+    if (proxy.mptcp !== undefined) {
+      group.mptcp = proxy.mptcp;
+    }
+    if (proxy.smux !== undefined) {
+      group.smux = proxy.smux;
+    }
+    if (proxy.history !== undefined) {
+      group.history = proxy.history;
+    }
+    if (proxy.now !== undefined) {
+      group.now = proxy.now;
+    }
+    if (proxy.hidden !== undefined) {
+      group.hidden = proxy.hidden;
+    }
+    if (proxy.icon !== undefined) {
+      group.icon = proxy.icon;
+    }
+    if (proxy.provider !== undefined) {
+      group.provider = proxy.provider;
+    }
+    return group;
+  }
+
+  private resolveProxyItem(
+    name: string,
+    records: Record<string, ProxyItem>,
+    providerMap: Record<string, ProxyItem>
+  ): ProxyItem {
+    if (records[name]) {
+      return records[name];
+    }
+    if (providerMap[name]) {
+      return providerMap[name];
+    }
+    const fallback: ProxyItem = {
+      name: name,
+      type: 'unknown',
+      udp: false,
+      xudp: false,
+      tfo: false,
+      mptcp: false,
+      smux: false,
+      history: []
+    };
+    return fallback;
+  }
+
+  private hasGroupChildren(proxy: ProxyItem): boolean {
+    return proxy.all !== undefined && proxy.all.length > 0;
+  }
+
+  private async request<T>(method: string, path: string, body: JsonPayload = null): Promise<T> {
     const request = http.createHttp();
     const url = `${this.config.baseUrl.replace(/\/$/, '')}${path}`;
     const header: Record<string, string> = {

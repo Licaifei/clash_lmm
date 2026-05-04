@@ -236,11 +236,14 @@ struct Index {
     try {
       const config = this.currentControllerConfig();
       this.api = new MihomoApiService(config);
-      const [version, baseConfig, proxies] = await Promise.all([
+      const responses = await Promise.all([
         this.api.getVersion(),
         this.api.getBaseConfig(),
         this.api.calcuProxies()
       ]);
+      const version = responses[0];
+      const baseConfig = responses[1];
+      const proxies = responses[2];
       this.applyVersion(version);
       this.applyBaseConfig(baseConfig);
       this.applyProxies(proxies);

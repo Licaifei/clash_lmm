@@ -42,8 +42,20 @@ export interface ProxyItem {
   provider?: string;
 }
 
-export interface ProxyGroupItem extends ProxyItem {
+export interface ProxyGroupItem {
+  name: string;
+  type: string;
+  udp?: boolean;
+  xudp?: boolean;
+  tfo?: boolean;
+  mptcp?: boolean;
+  smux?: boolean;
+  history?: ProxyHistory[];
   all?: ProxyItem[];
+  now?: string;
+  hidden?: boolean;
+  icon?: string;
+  provider?: string;
 }
 
 export interface ProxiesResponse {
