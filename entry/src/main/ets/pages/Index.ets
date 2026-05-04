@@ -1,4 +1,5 @@
 import { common } from '@kit.AbilityKit';
+import mediaquery from '@ohos.mediaquery';
 import { BasePage } from '../components/BasePage';
 import { StatusCard } from '../components/StatusCard';
 import { CalculatedProxies, ControllerConfig, MihomoBaseConfig, MihomoVersion, TrafficItem } from '../models/MihomoModels';
@@ -21,6 +22,8 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'settings', label: 'Settings' }
 ];
 
+const COMPACT_QUERY = '(max-width: 720vp)';
+
 @Entry
 @Component
 struct Index {
@@ -35,9 +38,11 @@ struct Index {
   @State private uploadRate: number = 0;
   @State private downloadRate: number = 0;
   @State private proxyGroups: string[] = [];
+  @State private compactLayout: boolean = false;
 
   private api?: MihomoApiService;
   private trafficWs: MihomoWsSubscription = new MihomoWsSubscription();
+  private compactListener?: mediaquery.MediaQueryListener;
 
   aboutToAppear(): void {
     const context = getContext(this) as common.UIAbilityContext;
@@ -47,9 +52,18 @@ struct Index {
     this.controllerSecret = settings.controller.secret;
     this.selectedPage = settings.selectedPage;
     this.api = new MihomoApiService(settings.controller);
+    this.compactListener = mediaquery.matchMediaSync(COMPACT_QUERY);
+    this.compactLayout = this.compactListener.matches;
+    this.compactListener.on('change', (result: mediaquery.MediaQueryResult): void => {
+      this.compactLayout = result.matches;
+    });
   }
 
   aboutToDisappear(): void {
+    if (this.compactListener !== undefined) {
+      this.compactListener.off('change');
+      this.compactListener = undefined;
+    }
     this.trafficWs.close();
   }
 
@@ -57,21 +71,25 @@ struct Index {
     Row() {
       Column() {
         Text('Mihomo Verge')
-          .fontSize(20)
+          .fontSize(this.compactLayout ? 14 : 20)
           .fontWeight(FontWeight.Bold)
           .fontColor('#171A1F')
-          .margin({ bottom: 16 })
+          .maxLines(this.compactLayout ? 2 : 1)
+          .textAlign(TextAlign.Center)
+          .width('100%')
+          .margin({ bottom: this.compactLayout ? 12 : 16 })
 
         ForEach(NAV_ITEMS, (item: NavItem) => {
           Button(item.label)
             .type(ButtonType.Normal)
             .stateEffect(true)
+            .fontSize(this.compactLayout ? 12 : 16)
             .fontColor(this.selectedPage === item.id ? Color.White : '#313842')
             .backgroundColor(this.selectedPage === item.id ? '#2268D8' : '#EEF1F6')
             .borderRadius(8)
             .width('100%')
-            .height(42)
-            .margin({ bottom: 8 })
+            .height(this.compactLayout ? 34 : 42)
+            .margin({ bottom: this.compactLayout ? 7 : 8 })
             .onClick(() => {
               this.selectedPage = item.id;
               this.persistSettings();
@@ -81,13 +99,15 @@ struct Index {
         Blank()
 
         Text(this.statusText)
-          .fontSize(12)
+          .fontSize(this.compactLayout ? 10 : 12)
           .fontColor('#5C6470')
-          .maxLines(2)
+          .maxLines(3)
+          .textAlign(TextAlign.Center)
+          .width('100%')
       }
-      .width(220)
+      .width(this.compactLayout ? 116 : 220)
       .height('100%')
-      .padding(20)
+      .padding(this.compactLayout ? 10 : 20)
       .backgroundColor(Color.White)
       .border({ width: 1, color: '#E5E8EF' })
 
@@ -111,22 +131,32 @@ struct Index {
 
   @Builder
   private HomeContent() {
-    BasePage({ title: 'Home' }) {
+    BasePage({ title: 'Home', compact: this.compactLayout }) {
       Column({ space: 16 }) {
-        Row({ space: 16 }) {
-          StatusCard({ title: 'Core', value: this.versionText, detail: this.statusText })
-            .layoutWeight(1)
-          StatusCard({ title: 'Mode', value: this.modeText, detail: 'Current Mihomo outbound mode' })
-            .layoutWeight(1)
-          StatusCard({ title: 'Traffic', value: `${this.formatBytes(this.downloadRate)}/s`, detail: `Up ${this.formatBytes(this.uploadRate)}/s` })
-            .layoutWeight(1)
+        if (this.compactLayout) {
+          Column({ space: 12 }) {
+            StatusCard({ title: 'Core', value: this.versionText, detail: this.statusText, compact: true })
+            StatusCard({ title: 'Mode', value: this.modeText, detail: 'Current Mihomo outbound mode', compact: true })
+            StatusCard({ title: 'Traffic', value: `${this.formatBytes(this.downloadRate)}/s`, detail: `Up ${this.formatBytes(this.uploadRate)}/s`, compact: true })
+          }
+          .width('100%')
+        } else {
+          Row({ space: 16 }) {
+            StatusCard({ title: 'Core', value: this.versionText, detail: this.statusText })
+              .layoutWeight(1)
+            StatusCard({ title: 'Mode', value: this.modeText, detail: 'Current Mihomo outbound mode' })
+              .layoutWeight(1)
+            StatusCard({ title: 'Traffic', value: `${this.formatBytes(this.downloadRate)}/s`, detail: `Up ${this.formatBytes(this.uploadRate)}/s` })
+              .layoutWeight(1)
+          }
+          .width('100%')
         }
-        .width('100%')
 
         Button('Connect and Refresh')
           .type(ButtonType.Normal)
           .height(44)
           .borderRadius(8)
+          .width(this.compactLayout ? '100%' : 220)
           .backgroundColor('#2268D8')
           .fontColor(Color.White)
           .onClick(() => {
@@ -139,13 +169,21 @@ struct Index {
 
   @Builder
   private ProxiesContent() {
-    BasePage({ title: 'Proxies' }) {
+    BasePage({ title: 'Proxies', compact: this.compactLayout }) {
       Column({ space: 12 }) {
-        Row({ space: 16 }) {
-          StatusCard({ title: 'Groups', value: `${this.proxyGroupCount}`, detail: 'Selectable proxy groups' })
-            .layoutWeight(1)
-          StatusCard({ title: 'Nodes', value: `${this.proxyCount}`, detail: 'Leaf proxy nodes' })
-            .layoutWeight(1)
+        if (this.compactLayout) {
+          Column({ space: 12 }) {
+            StatusCard({ title: 'Groups', value: `${this.proxyGroupCount}`, detail: 'Selectable proxy groups', compact: true })
+            StatusCard({ title: 'Nodes', value: `${this.proxyCount}`, detail: 'Leaf proxy nodes', compact: true })
+          }
+          .width('100%')
+        } else {
+          Row({ space: 16 }) {
+            StatusCard({ title: 'Groups', value: `${this.proxyGroupCount}`, detail: 'Selectable proxy groups' })
+              .layoutWeight(1)
+            StatusCard({ title: 'Nodes', value: `${this.proxyCount}`, detail: 'Leaf proxy nodes' })
+              .layoutWeight(1)
+          }
         }
 
         List() {
@@ -178,13 +216,15 @@ struct Index {
 
   @Builder
   private SettingsContent() {
-    BasePage({ title: 'Settings' }) {
+    BasePage({ title: 'Settings', compact: this.compactLayout }) {
       Column({ space: 14 }) {
         Text('Controller URL')
           .fontSize(13)
           .fontColor('#5C6470')
+          .width('100%')
         TextInput({ text: this.controllerUrl })
           .height(44)
+          .width('100%')
           .onChange((value: string) => {
             this.controllerUrl = value;
           })
@@ -192,8 +232,10 @@ struct Index {
         Text('Secret')
           .fontSize(13)
           .fontColor('#5C6470')
+          .width('100%')
         TextInput({ text: this.controllerSecret })
           .height(44)
+          .width('100%')
           .type(InputType.Password)
           .onChange((value: string) => {
             this.controllerSecret = value;
@@ -203,6 +245,7 @@ struct Index {
           .type(ButtonType.Normal)
           .height(44)
           .borderRadius(8)
+          .width(this.compactLayout ? '100%' : 180)
           .backgroundColor('#2268D8')
           .fontColor(Color.White)
           .onClick(() => {
@@ -211,14 +254,14 @@ struct Index {
             this.statusText = 'Settings saved';
           })
       }
-      .width(520)
+      .width('100%')
       .alignItems(HorizontalAlign.Start)
     }
   }
 
   @Builder
   private PlaceholderContent(title: string) {
-    BasePage({ title }) {
+    BasePage({ title: title, compact: this.compactLayout }) {
       Column({ space: 12 }) {
         Text(`${title} page scaffold`)
           .fontSize(18)
@@ -251,7 +294,7 @@ struct Index {
       this.statusText = 'Connected';
       this.persistSettings();
     } catch (error) {
-      this.statusText = `${error}`;
+      this.statusText = this.formatError(error);
     }
   }
 
@@ -314,5 +357,12 @@ struct Index {
       return `${(value / 1024).toFixed(1)} KB`;
     }
     return `${(value / 1024 / 1024).toFixed(1)} MB`;
+  }
+
+  private formatError(error: Object): string {
+    if (error instanceof Error) {
+      return error.message;
+    }
+    return `${error}`;
   }
 }
