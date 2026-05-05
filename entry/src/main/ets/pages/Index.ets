@@ -1,11 +1,23 @@
 import { common } from '@kit.AbilityKit';
 import mediaquery from '@ohos.mediaquery';
-import { BasePage } from '../components/BasePage';
-import { StatusCard } from '../components/StatusCard';
-import { CalculatedProxies, ControllerConfig, MihomoBaseConfig, MihomoVersion, TrafficItem } from '../models/MihomoModels';
+import {
+  CalculatedProxies,
+  ControllerConfig,
+  MihomoBaseConfig,
+  MihomoVersion,
+  TrafficItem
+} from '../models/MihomoModels';
 import { AppConfigStore, AppSettings } from '../services/AppConfigStore';
 import { MihomoApiService } from '../services/MihomoApiService';
 import { MihomoWsSubscription } from '../services/MihomoWsService';
+import { HomePage } from './HomePage';
+import { ProxiesPage } from './ProxiesPage';
+import { SettingsPage } from './SettingsPage';
+import { ConnectionsPage } from './ConnectionsPage';
+import { ProvidersPage } from './ProvidersPage';
+import { ProfilesPage } from './ProfilesPage';
+import { RulesPage } from './RulesPage';
+import { LogsPage } from './LogsPage';
 
 interface NavItem {
   id: string;
@@ -15,6 +27,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { id: 'home', label: 'Home' },
   { id: 'proxies', label: 'Proxies' },
+  { id: 'providers', label: 'Providers' },
   { id: 'profiles', label: 'Profiles' },
   { id: 'connections', label: 'Connections' },
   { id: 'rules', label: 'Rules' },
@@ -38,6 +51,7 @@ struct Index {
   @State private uploadRate: number = 0;
   @State private downloadRate: number = 0;
   @State private proxyGroups: string[] = [];
+  @State private lastError: string = '';
   @State private compactLayout: boolean = false;
 
   private api?: MihomoApiService;
@@ -113,13 +127,52 @@ struct Index {
 
       Column() {
         if (this.selectedPage === 'home') {
-          this.HomeContent()
+          HomePage({
+            versionText: this.versionText,
+            modeText: this.modeText,
+            uploadRate: this.uploadRate,
+            downloadRate: this.downloadRate,
+            proxyGroupCount: this.proxyGroupCount,
+            proxyCount: this.proxyCount,
+            statusText: this.statusText,
+            lastError: this.lastError,
+            compact: this.compactLayout,
+            onConnectAndRefresh: (): void => {
+              this.connectAndRefresh();
+            }
+          })
         } else if (this.selectedPage === 'proxies') {
-          this.ProxiesContent()
+          ProxiesPage({
+            proxyGroupCount: this.proxyGroupCount,
+            proxyCount: this.proxyCount,
+            compact: this.compactLayout,
+            proxyGroups: this.proxyGroups
+          })
+        } else if (this.selectedPage === 'providers') {
+          ProvidersPage({ compact: this.compactLayout })
+        } else if (this.selectedPage === 'profiles') {
+          ProfilesPage({ compact: this.compactLayout })
+        } else if (this.selectedPage === 'connections') {
+          ConnectionsPage({ compact: this.compactLayout })
+        } else if (this.selectedPage === 'rules') {
+          RulesPage({ compact: this.compactLayout })
+        } else if (this.selectedPage === 'logs') {
+          LogsPage({ compact: this.compactLayout })
         } else if (this.selectedPage === 'settings') {
-          this.SettingsContent()
-        } else {
-          this.PlaceholderContent(this.currentTitle())
+          SettingsPage({
+            controllerUrl: this.controllerUrl,
+            controllerSecret: this.controllerSecret,
+            compact: this.compactLayout,
+            onUrlChange: (value: string): void => {
+              this.controllerUrl = value;
+            },
+            onSecretChange: (value: string): void => {
+              this.controllerSecret = value;
+            },
+            onSave: (): void => {
+              this.saveSettings();
+            }
+          })
         }
       }
       .layoutWeight(1)
@@ -127,152 +180,6 @@ struct Index {
     }
     .width('100%')
     .height('100%')
-  }
-
-  @Builder
-  private HomeContent() {
-    BasePage({ title: 'Home', compact: this.compactLayout }) {
-      Column({ space: 16 }) {
-        if (this.compactLayout) {
-          Column({ space: 12 }) {
-            StatusCard({ title: 'Core', value: this.versionText, detail: this.statusText, compact: true })
-            StatusCard({ title: 'Mode', value: this.modeText, detail: 'Current Mihomo outbound mode', compact: true })
-            StatusCard({ title: 'Traffic', value: `${this.formatBytes(this.downloadRate)}/s`, detail: `Up ${this.formatBytes(this.uploadRate)}/s`, compact: true })
-          }
-          .width('100%')
-        } else {
-          Row({ space: 16 }) {
-            StatusCard({ title: 'Core', value: this.versionText, detail: this.statusText })
-              .layoutWeight(1)
-            StatusCard({ title: 'Mode', value: this.modeText, detail: 'Current Mihomo outbound mode' })
-              .layoutWeight(1)
-            StatusCard({ title: 'Traffic', value: `${this.formatBytes(this.downloadRate)}/s`, detail: `Up ${this.formatBytes(this.uploadRate)}/s` })
-              .layoutWeight(1)
-          }
-          .width('100%')
-        }
-
-        Button('Connect and Refresh')
-          .type(ButtonType.Normal)
-          .height(44)
-          .borderRadius(8)
-          .width(this.compactLayout ? '100%' : 220)
-          .backgroundColor('#2268D8')
-          .fontColor(Color.White)
-          .onClick(() => {
-            this.connectAndRefresh();
-          })
-      }
-      .width('100%')
-    }
-  }
-
-  @Builder
-  private ProxiesContent() {
-    BasePage({ title: 'Proxies', compact: this.compactLayout }) {
-      Column({ space: 12 }) {
-        if (this.compactLayout) {
-          Column({ space: 12 }) {
-            StatusCard({ title: 'Groups', value: `${this.proxyGroupCount}`, detail: 'Selectable proxy groups', compact: true })
-            StatusCard({ title: 'Nodes', value: `${this.proxyCount}`, detail: 'Leaf proxy nodes', compact: true })
-          }
-          .width('100%')
-        } else {
-          Row({ space: 16 }) {
-            StatusCard({ title: 'Groups', value: `${this.proxyGroupCount}`, detail: 'Selectable proxy groups' })
-              .layoutWeight(1)
-            StatusCard({ title: 'Nodes', value: `${this.proxyCount}`, detail: 'Leaf proxy nodes' })
-              .layoutWeight(1)
-          }
-        }
-
-        List() {
-          ForEach(this.proxyGroups, (name: string) => {
-            ListItem() {
-              Row() {
-                Text(name)
-                  .fontSize(16)
-                  .fontColor('#171A1F')
-                Blank()
-                Text('Select')
-                  .fontSize(12)
-                  .fontColor('#2268D8')
-              }
-              .height(48)
-              .padding({ left: 16, right: 16 })
-              .backgroundColor(Color.White)
-              .borderRadius(8)
-              .border({ width: 1, color: '#E5E8EF' })
-            }
-          }, (name: string) => name)
-        }
-        .width('100%')
-        .layoutWeight(1)
-      }
-      .width('100%')
-      .height('100%')
-    }
-  }
-
-  @Builder
-  private SettingsContent() {
-    BasePage({ title: 'Settings', compact: this.compactLayout }) {
-      Column({ space: 14 }) {
-        Text('Controller URL')
-          .fontSize(13)
-          .fontColor('#5C6470')
-          .width('100%')
-        TextInput({ text: this.controllerUrl })
-          .height(44)
-          .width('100%')
-          .onChange((value: string) => {
-            this.controllerUrl = value;
-          })
-
-        Text('Secret')
-          .fontSize(13)
-          .fontColor('#5C6470')
-          .width('100%')
-        TextInput({ text: this.controllerSecret })
-          .height(44)
-          .width('100%')
-          .type(InputType.Password)
-          .onChange((value: string) => {
-            this.controllerSecret = value;
-          })
-
-        Button('Save Settings')
-          .type(ButtonType.Normal)
-          .height(44)
-          .borderRadius(8)
-          .width(this.compactLayout ? '100%' : 180)
-          .backgroundColor('#2268D8')
-          .fontColor(Color.White)
-          .onClick(() => {
-            this.persistSettings();
-            this.api = new MihomoApiService(this.currentControllerConfig());
-            this.statusText = 'Settings saved';
-          })
-      }
-      .width('100%')
-      .alignItems(HorizontalAlign.Start)
-    }
-  }
-
-  @Builder
-  private PlaceholderContent(title: string) {
-    BasePage({ title: title, compact: this.compactLayout }) {
-      Column({ space: 12 }) {
-        Text(`${title} page scaffold`)
-          .fontSize(18)
-          .fontWeight(FontWeight.Medium)
-        Text('Next step: wire this page to the corresponding Mihomo endpoint and shared store.')
-          .fontSize(14)
-          .fontColor('#5C6470')
-      }
-      .alignItems(HorizontalAlign.Start)
-      .width('100%')
-    }
   }
 
   private async connectAndRefresh(): Promise<void> {
@@ -292,23 +199,26 @@ struct Index {
       this.applyProxies(proxies);
       this.startTraffic(config);
       this.statusText = 'Connected';
+      this.lastError = '';
       this.persistSettings();
     } catch (error) {
       this.statusText = this.formatError(error);
+      this.lastError = this.formatError(error);
     }
   }
 
   private startTraffic(config: ControllerConfig): void {
-    this.trafficWs.connect(config, 'traffic', (message: string) => {
+    this.trafficWs.connect(config, 'traffic', (message: string): void => {
       try {
         const traffic = JSON.parse(message) as TrafficItem;
         this.uploadRate = traffic.up;
         this.downloadRate = traffic.down;
       } catch (_error) {
-        this.statusText = 'Ignored invalid traffic message';
+        // Ignore invalid traffic messages
       }
-    }, (message: string) => {
+    }, (message: string): void => {
       this.statusText = `Traffic stream failed: ${message}`;
+      this.lastError = `Traffic stream failed: ${message}`;
     });
   }
 
@@ -326,9 +236,10 @@ struct Index {
     this.proxyGroups = proxies.groups.map((group) => group.name);
   }
 
-  private currentTitle(): string {
-    const current = NAV_ITEMS.find((item: NavItem) => item.id === this.selectedPage);
-    return current?.label ?? 'Page';
+  private saveSettings(): void {
+    this.api = new MihomoApiService(this.currentControllerConfig());
+    this.statusText = 'Settings saved';
+    this.persistSettings();
   }
 
   private currentControllerConfig(): ControllerConfig {
@@ -347,16 +258,6 @@ struct Index {
       selectedPage: this.selectedPage
     };
     store.save(settings);
-  }
-
-  private formatBytes(value: number): string {
-    if (value < 1024) {
-      return `${value} B`;
-    }
-    if (value < 1024 * 1024) {
-      return `${(value / 1024).toFixed(1)} KB`;
-    }
-    return `${(value / 1024 / 1024).toFixed(1)} MB`;
   }
 
   private formatError(error: Object): string {
