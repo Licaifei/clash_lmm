@@ -2,6 +2,7 @@ import { common } from '@kit.AbilityKit';
 import mediaquery from '@ohos.mediaquery';
 import {
   CalculatedProxies,
+  ConnectionState,
   ControllerConfig,
   MihomoBaseConfig,
   MihomoVersion,
@@ -43,7 +44,7 @@ struct Index {
   @State private selectedPage: string = 'home';
   @State private controllerUrl: string = 'http://127.0.0.1:9090';
   @State private controllerSecret: string = '';
-  @State private statusText: string = 'Not connected';
+  @State private connectionState: string = ConnectionState.DISCONNECTED;
   @State private versionText: string = '-';
   @State private modeText: string = '-';
   @State private proxyGroupCount: number = 0;
@@ -57,6 +58,7 @@ struct Index {
   private api?: MihomoApiService;
   private trafficWs: MihomoWsSubscription = new MihomoWsSubscription();
   private compactListener?: mediaquery.MediaQueryListener;
+  private opVersion: number = 0;
 
   aboutToAppear(): void {
     const context = getContext(this) as common.UIAbilityContext;
@@ -112,7 +114,7 @@ struct Index {
 
         Blank()
 
-        Text(this.statusText)
+        Text(this.statusLabel())
           .fontSize(this.compactLayout ? 10 : 12)
           .fontColor('#5C6470')
           .maxLines(3)
@@ -128,17 +130,23 @@ struct Index {
       Column() {
         if (this.selectedPage === 'home') {
           HomePage({
+            connectionState: this.connectionState,
             versionText: this.versionText,
             modeText: this.modeText,
             uploadRate: this.uploadRate,
             downloadRate: this.downloadRate,
             proxyGroupCount: this.proxyGroupCount,
             proxyCount: this.proxyCount,
-            statusText: this.statusText,
             lastError: this.lastError,
             compact: this.compactLayout,
-            onConnectAndRefresh: (): void => {
-              this.connectAndRefresh();
+            onConnect: (): void => {
+              this.connect();
+            },
+            onRefresh: (): void => {
+              this.refresh();
+            },
+            onDisconnect: (): void => {
+              this.disconnect();
             }
           })
         } else if (this.selectedPage === 'proxies') {
@@ -182,7 +190,33 @@ struct Index {
     .height('100%')
   }
 
-  private async connectAndRefresh(): Promise<void> {
+  private statusLabel(): string {
+    if (this.connectionState === ConnectionState.DISCONNECTED) {
+      return 'Disconnected';
+    }
+    if (this.connectionState === ConnectionState.CONNECTING) {
+      return 'Connecting...';
+    }
+    if (this.connectionState === ConnectionState.CONNECTED) {
+      return 'Connected';
+    }
+    if (this.connectionState === ConnectionState.REFRESHING) {
+      return 'Refreshing...';
+    }
+    if (this.connectionState === ConnectionState.FAILED) {
+      return 'Failed';
+    }
+    return 'Disconnected';
+  }
+
+  private async connect(): Promise<void> {
+    if (this.connectionState !== ConnectionState.DISCONNECTED &&
+      this.connectionState !== ConnectionState.FAILED) {
+      return;
+    }
+    this.connectionState = ConnectionState.CONNECTING;
+    this.lastError = '';
+    const token = ++this.opVersion;
     try {
       const config = this.currentControllerConfig();
       this.api = new MihomoApiService(config);
@@ -191,6 +225,9 @@ struct Index {
         this.api.getBaseConfig(),
         this.api.calcuProxies()
       ]);
+      if (token !== this.opVersion) {
+        return;
+      }
       const version = responses[0];
       const baseConfig = responses[1];
       const proxies = responses[2];
@@ -198,13 +235,56 @@ struct Index {
       this.applyBaseConfig(baseConfig);
       this.applyProxies(proxies);
       this.startTraffic(config);
-      this.statusText = 'Connected';
-      this.lastError = '';
+      this.connectionState = ConnectionState.CONNECTED;
       this.persistSettings();
     } catch (error) {
-      this.statusText = this.formatError(error);
+      if (token !== this.opVersion) {
+        return;
+      }
+      this.connectionState = ConnectionState.FAILED;
       this.lastError = this.formatError(error);
     }
+  }
+
+  private async refresh(): Promise<void> {
+    if (this.connectionState !== ConnectionState.CONNECTED) {
+      return;
+    }
+    if (this.api === undefined) {
+      return;
+    }
+    this.connectionState = ConnectionState.REFRESHING;
+    this.lastError = '';
+    const token = ++this.opVersion;
+    try {
+      const responses = await Promise.all([
+        this.api.getVersion(),
+        this.api.getBaseConfig(),
+        this.api.calcuProxies()
+      ]);
+      if (token !== this.opVersion) {
+        return;
+      }
+      this.applyVersion(responses[0]);
+      this.applyBaseConfig(responses[1]);
+      this.applyProxies(responses[2]);
+      this.connectionState = ConnectionState.CONNECTED;
+    } catch (error) {
+      if (token !== this.opVersion) {
+        return;
+      }
+      this.connectionState = ConnectionState.CONNECTED;
+      this.lastError = this.formatError(error);
+    }
+  }
+
+  private disconnect(): void {
+    ++this.opVersion;
+    this.trafficWs.close();
+    this.uploadRate = 0;
+    this.downloadRate = 0;
+    this.lastError = '';
+    this.connectionState = ConnectionState.DISCONNECTED;
   }
 
   private startTraffic(config: ControllerConfig): void {
@@ -217,7 +297,6 @@ struct Index {
         // Ignore invalid traffic messages
       }
     }, (message: string): void => {
-      this.statusText = `Traffic stream failed: ${message}`;
       this.lastError = `Traffic stream failed: ${message}`;
     });
   }
@@ -237,9 +316,14 @@ struct Index {
   }
 
   private saveSettings(): void {
+    ++this.opVersion;
+    this.trafficWs.close();
+    this.uploadRate = 0;
+    this.downloadRate = 0;
+    this.lastError = '';
     this.api = new MihomoApiService(this.currentControllerConfig());
-    this.statusText = 'Settings saved';
     this.persistSettings();
+    this.connectionState = ConnectionState.DISCONNECTED;
   }
 
   private currentControllerConfig(): ControllerConfig {

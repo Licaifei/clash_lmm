@@ -1,3 +1,11 @@
+export enum ConnectionState {
+  DISCONNECTED = 'disconnected',
+  CONNECTING = 'connecting',
+  CONNECTED = 'connected',
+  REFRESHING = 'refreshing',
+  FAILED = 'failed'
+}
+
 export interface ControllerConfig {
   baseUrl: string;
   secret: string;
