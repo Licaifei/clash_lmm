@@ -52,6 +52,7 @@ struct Index {
   @State private uploadRate: number = 0;
   @State private downloadRate: number = 0;
   @State private proxyGroups: string[] = [];
+  @State private calculatedProxies: CalculatedProxies | null = null;
   @State private lastError: string = '';
   @State private compactLayout: boolean = false;
 
@@ -151,10 +152,12 @@ struct Index {
           })
         } else if (this.selectedPage === 'proxies') {
           ProxiesPage({
-            proxyGroupCount: this.proxyGroupCount,
-            proxyCount: this.proxyCount,
+            groups: this.calculatedProxies?.groups ?? [],
+            api: this.api,
             compact: this.compactLayout,
-            proxyGroups: this.proxyGroups
+            onRefreshProxies: async (): Promise<void> => {
+              await this.refreshProxiesOnly();
+            }
           })
         } else if (this.selectedPage === 'providers') {
           ProvidersPage({ compact: this.compactLayout })
@@ -313,6 +316,21 @@ struct Index {
     this.proxyGroupCount = proxies.groups.length;
     this.proxyCount = proxies.proxies.length;
     this.proxyGroups = proxies.groups.map((group) => group.name);
+    this.calculatedProxies = proxies;
+  }
+
+  private async refreshProxiesOnly(): Promise<void> {
+    if (this.api === undefined) {
+      return;
+    }
+    try {
+      const proxies = await this.api.calcuProxies();
+      this.applyProxies(proxies);
+    } catch (error) {
+      const errMsg = this.formatError(error);
+      this.lastError = errMsg;
+      throw new Error(errMsg);
+    }
   }
 
   private saveSettings(): void {
