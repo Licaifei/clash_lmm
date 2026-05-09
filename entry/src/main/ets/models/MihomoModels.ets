@@ -149,3 +149,20 @@ export interface CalculatedProxies {
   records: Record<string, ProxyItem>;
   proxies: ProxyItem[];
 }
+
+export interface SubscriptionProfile {
+  id: string;
+  name: string;
+  sourceUrl: string;
+  lastUpdated: string;
+  byteSize: number;
+  contentHash: string;
+  detectedFormat: string;
+  userInfo: string;
+  note: string;
+}
+
+export interface SubscriptionState {
+  subscriptions: SubscriptionProfile[];
+  activeId: string;
+}

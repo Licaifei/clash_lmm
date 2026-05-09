@@ -12,6 +12,7 @@ import { AppConfigStore, AppSettings } from '../services/AppConfigStore';
 import { MihomoApiService } from '../services/MihomoApiService';
 import { MihomoWsSubscription } from '../services/MihomoWsService';
 import { VpnService } from '../services/VpnService';
+import { SubscriptionStore } from '../services/SubscriptionStore';
 import { HomePage } from './HomePage';
 import { ProxiesPage } from './ProxiesPage';
 import { SettingsPage } from './SettingsPage';
@@ -20,6 +21,7 @@ import { ProvidersPage } from './ProvidersPage';
 import { ProfilesPage } from './ProfilesPage';
 import { RulesPage } from './RulesPage';
 import { LogsPage } from './LogsPage';
+import { SubscriptionPage } from './SubscriptionPage';
 
 interface NavItem {
   id: string;
@@ -30,6 +32,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'home', label: 'Home' },
   { id: 'proxies', label: 'Proxies' },
   { id: 'providers', label: 'Providers' },
+  { id: 'subscriptions', label: 'Subscriptions' },
   { id: 'profiles', label: 'Profiles' },
   { id: 'connections', label: 'Connections' },
   { id: 'rules', label: 'Rules' },
@@ -63,6 +66,7 @@ struct Index {
   private compactListener?: mediaquery.MediaQueryListener;
   private opVersion: number = 0;
   private vpnService: VpnService = new VpnService();
+  private subStore?: SubscriptionStore;
 
   aboutToAppear(): void {
     const context = getContext(this) as common.UIAbilityContext;
@@ -72,6 +76,7 @@ struct Index {
     this.controllerSecret = settings.controller.secret;
     this.selectedPage = settings.selectedPage;
     this.api = new MihomoApiService(settings.controller);
+    this.subStore = new SubscriptionStore(context);
     this.compactListener = mediaquery.matchMediaSync(COMPACT_QUERY);
     this.compactLayout = this.compactListener.matches;
     this.compactListener.on('change', (result: mediaquery.MediaQueryResult): void => {
@@ -171,6 +176,8 @@ struct Index {
           })
         } else if (this.selectedPage === 'providers') {
           ProvidersPage({ compact: this.compactLayout })
+        } else if (this.selectedPage === 'subscriptions') {
+          SubscriptionPage({ store: this.subStore, compact: this.compactLayout })
         } else if (this.selectedPage === 'profiles') {
           ProfilesPage({ compact: this.compactLayout })
         } else if (this.selectedPage === 'connections') {
