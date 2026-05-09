@@ -11,6 +11,7 @@ import {
 import { AppConfigStore, AppSettings } from '../services/AppConfigStore';
 import { MihomoApiService } from '../services/MihomoApiService';
 import { MihomoWsSubscription } from '../services/MihomoWsService';
+import { VpnService } from '../services/VpnService';
 import { HomePage } from './HomePage';
 import { ProxiesPage } from './ProxiesPage';
 import { SettingsPage } from './SettingsPage';
@@ -54,12 +55,14 @@ struct Index {
   @State private proxyGroups: string[] = [];
   @State private calculatedProxies: CalculatedProxies | null = null;
   @State private lastError: string = '';
+  @State private vpnState: string = 'idle';
   @State private compactLayout: boolean = false;
 
   private api?: MihomoApiService;
   private trafficWs: MihomoWsSubscription = new MihomoWsSubscription();
   private compactListener?: mediaquery.MediaQueryListener;
   private opVersion: number = 0;
+  private vpnService: VpnService = new VpnService();
 
   aboutToAppear(): void {
     const context = getContext(this) as common.UIAbilityContext;
@@ -148,6 +151,13 @@ struct Index {
             },
             onDisconnect: (): void => {
               this.disconnect();
+            },
+            vpnState: this.vpnState,
+            onVpnStart: (): void => {
+              this.startVpn();
+            },
+            onVpnStop: (): void => {
+              this.stopVpn();
             }
           })
         } else if (this.selectedPage === 'proxies') {
@@ -319,14 +329,37 @@ struct Index {
     this.calculatedProxies = proxies;
   }
 
+  private async startVpn(): Promise<void> {
+    const result = await this.vpnService.start();
+    this.vpnState = this.vpnService.getState();
+    if (!result.success && result.error !== undefined) {
+      this.lastError = result.error;
+    }
+  }
+
+  private async stopVpn(): Promise<void> {
+    const result = await this.vpnService.stop();
+    this.vpnState = this.vpnService.getState();
+    if (!result.success && result.error !== undefined) {
+      this.lastError = result.error;
+    }
+  }
+
   private async refreshProxiesOnly(): Promise<void> {
     if (this.api === undefined) {
       return;
     }
+    const token = ++this.opVersion;
     try {
       const proxies = await this.api.calcuProxies();
+      if (token !== this.opVersion) {
+        return;
+      }
       this.applyProxies(proxies);
     } catch (error) {
+      if (token !== this.opVersion) {
+        return;
+      }
       const errMsg = this.formatError(error);
       this.lastError = errMsg;
       throw new Error(errMsg);

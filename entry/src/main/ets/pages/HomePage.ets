@@ -17,6 +17,9 @@ export struct HomePage {
   onConnect?: () => void;
   onRefresh?: () => void;
   onDisconnect?: () => void;
+  @Prop vpnState: string = 'idle';
+  onVpnStart?: () => void;
+  onVpnStop?: () => void;
 
   private formatBytes(value: number): string {
     if (value < 1024) {
@@ -61,6 +64,33 @@ export struct HomePage {
 
   private canDisconnect(): boolean {
     return this.connectionState === 'connected' || this.connectionState === 'refreshing';
+  }
+
+  private vpnStatusText(): string {
+    if (this.vpnState === 'idle') {
+      return 'VPN Extension: Stopped';
+    }
+    if (this.vpnState === 'starting') {
+      return 'VPN Extension: Starting...';
+    }
+    if (this.vpnState === 'extensionActive') {
+      return 'VPN Extension: Active';
+    }
+    if (this.vpnState === 'stopping') {
+      return 'VPN Extension: Stopping...';
+    }
+    if (this.vpnState === 'error') {
+      return 'VPN Extension: Error';
+    }
+    return 'VPN Extension: Stopped';
+  }
+
+  private canStartVpn(): boolean {
+    return this.vpnState === 'idle' || this.vpnState === 'error';
+  }
+
+  private canStopVpn(): boolean {
+    return this.vpnState === 'extensionActive' || this.vpnState === 'starting';
   }
 
   build() {
@@ -220,6 +250,43 @@ export struct HomePage {
           }
           .width('100%')
         }
+
+        Row({ space: 12 }) {
+          Button('Start VPN Extension')
+            .type(ButtonType.Normal)
+            .height(40)
+            .borderRadius(8)
+            .layoutWeight(1)
+            .backgroundColor('#2E7D32')
+            .fontColor(Color.White)
+            .enabled(this.canStartVpn())
+            .opacity(this.canStartVpn() ? 1 : 0.4)
+            .onClick((): void => {
+              if (this.onVpnStart !== undefined) {
+                this.onVpnStart();
+              }
+            })
+          Button('Stop VPN Extension')
+            .type(ButtonType.Normal)
+            .height(40)
+            .borderRadius(8)
+            .layoutWeight(1)
+            .backgroundColor('#C62828')
+            .fontColor(Color.White)
+            .enabled(this.canStopVpn())
+            .opacity(this.canStopVpn() ? 1 : 0.4)
+            .onClick((): void => {
+              if (this.onVpnStop !== undefined) {
+                this.onVpnStop();
+              }
+            })
+        }
+        .width('100%')
+
+        Text(this.vpnStatusText())
+          .fontSize(12)
+          .fontColor('#5C6470')
+          .width('100%')
 
         if (this.isConnected()) {
           if (this.compact) {

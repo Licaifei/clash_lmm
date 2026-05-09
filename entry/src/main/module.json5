@@ -51,6 +51,12 @@
             "resource": "$profile:backup_config"
           }
         ],
+      },
+      {
+        "name": "MihomoVpnExtension",
+        "srcEntry": "./ets/extensionability/MihomoVpnExtension.ets",
+        "type": "vpn",
+        "exported": false
       }
     ]
   }
