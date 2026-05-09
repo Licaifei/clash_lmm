@@ -174,3 +174,19 @@ export interface GeneratedConfig {
   mixedPort: number;
   timestamp: string;
 }
+
+export type CoreState = 'stopped' | 'starting' | 'running' | 'stopping' | 'failed' | 'missing';
+
+export interface CoreStartResult {
+  success: boolean;
+  error?: string;
+  state: CoreState;
+}
+
+export interface CoreInstallInfo {
+  installed: boolean;
+  artifactVersion: string;
+  cpuAbi: string;
+  sandboxPath: string;
+  lastError: string;
+}

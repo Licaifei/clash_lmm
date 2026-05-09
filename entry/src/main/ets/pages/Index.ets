@@ -14,6 +14,7 @@ import { MihomoWsSubscription } from '../services/MihomoWsService';
 import { VpnService } from '../services/VpnService';
 import { SubscriptionStore } from '../services/SubscriptionStore';
 import { MihomoConfigService } from '../services/MihomoConfigService';
+import { MihomoCoreRuntime } from '../services/MihomoCoreRuntime';
 import { HomePage } from './HomePage';
 import { ProxiesPage } from './ProxiesPage';
 import { SettingsPage } from './SettingsPage';
@@ -60,6 +61,7 @@ struct Index {
   @State private calculatedProxies: CalculatedProxies | null = null;
   @State private lastError: string = '';
   @State private vpnState: string = 'idle';
+  @State private coreState: string = 'stopped';
   @State private compactLayout: boolean = false;
 
   private api?: MihomoApiService;
@@ -69,6 +71,7 @@ struct Index {
   private vpnService: VpnService = new VpnService();
   private subStore?: SubscriptionStore;
   private configService?: MihomoConfigService;
+  private coreRuntime?: MihomoCoreRuntime;
 
   aboutToAppear(): void {
     const context = this.getAbilityContext();
@@ -80,6 +83,9 @@ struct Index {
     this.api = new MihomoApiService(settings.controller);
     this.subStore = new SubscriptionStore(context);
     this.configService = new MihomoConfigService(context);
+    this.coreRuntime = new MihomoCoreRuntime(context);
+    this.coreRuntime.initRuntime();
+    this.coreState = this.coreRuntime.getState();
     const compactListener = this.getUIContext().getMediaQuery().matchMediaSync(COMPACT_QUERY);
     this.compactListener = compactListener;
     this.compactLayout = compactListener.matches;
@@ -167,6 +173,13 @@ struct Index {
             },
             onVpnStop: (): void => {
               this.stopVpn();
+            },
+            coreState: this.coreState,
+            onCoreStart: (): void => {
+              this.startCore();
+            },
+            onCoreStop: (): void => {
+              this.stopCore();
             }
           })
         } else if (this.selectedPage === 'proxies') {
@@ -347,6 +360,39 @@ struct Index {
     this.proxyCount = proxies.proxies.length;
     this.proxyGroups = proxies.groups.map((group) => group.name);
     this.calculatedProxies = proxies;
+  }
+
+  private async startCore(): Promise<void> {
+    if (this.coreRuntime === undefined || this.configService === undefined) {
+      return;
+    }
+    const result = await this.coreRuntime.start(this.configService);
+    this.coreState = this.coreRuntime.getState();
+    if (!result.success && result.error !== undefined) {
+      this.lastError = result.error;
+    }
+    if (result.success) {
+      const generated = this.configService.loadGeneratedConfig();
+      if (generated !== null) {
+        this.controllerUrl = generated.controllerUrl;
+        this.controllerSecret = generated.controllerSecret;
+        this.api = new MihomoApiService({
+          baseUrl: generated.controllerUrl,
+          secret: generated.controllerSecret
+        });
+      }
+    }
+  }
+
+  private async stopCore(): Promise<void> {
+    if (this.coreRuntime === undefined) {
+      return;
+    }
+    const result = await this.coreRuntime.stop();
+    this.coreState = this.coreRuntime.getState();
+    if (!result.success && result.error !== undefined) {
+      this.lastError = result.error;
+    }
   }
 
   private async startVpn(): Promise<void> {

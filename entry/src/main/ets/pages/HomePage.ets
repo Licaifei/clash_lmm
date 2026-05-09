@@ -20,6 +20,9 @@ export struct HomePage {
   @Prop vpnState: string = 'idle';
   onVpnStart?: () => void;
   onVpnStop?: () => void;
+  @Prop coreState: string = 'stopped';
+  onCoreStart?: () => void;
+  onCoreStop?: () => void;
 
   private formatBytes(value: number): string {
     if (value < 1024) {
@@ -91,6 +94,36 @@ export struct HomePage {
 
   private canStopVpn(): boolean {
     return this.vpnState === 'extensionActive' || this.vpnState === 'starting';
+  }
+
+  private coreStatusText(): string {
+    if (this.coreState === 'stopped') {
+      return 'Core: Stopped';
+    }
+    if (this.coreState === 'starting') {
+      return 'Core: Starting...';
+    }
+    if (this.coreState === 'running') {
+      return 'Core: Running';
+    }
+    if (this.coreState === 'stopping') {
+      return 'Core: Stopping...';
+    }
+    if (this.coreState === 'failed') {
+      return 'Core: Failed';
+    }
+    if (this.coreState === 'missing') {
+      return 'Core: Runtime not installed';
+    }
+    return 'Core: Stopped';
+  }
+
+  private canStartCore(): boolean {
+    return this.coreState === 'stopped' || this.coreState === 'failed';
+  }
+
+  private canStopCore(): boolean {
+    return this.coreState === 'running' || this.coreState === 'starting';
   }
 
   build() {
@@ -284,6 +317,43 @@ export struct HomePage {
         .width('100%')
 
         Text(this.vpnStatusText())
+          .fontSize(12)
+          .fontColor('#5C6470')
+          .width('100%')
+
+        Row({ space: 12 }) {
+          Button('Start Core')
+            .type(ButtonType.Normal)
+            .height(40)
+            .borderRadius(8)
+            .layoutWeight(1)
+            .backgroundColor('#1565C0')
+            .fontColor(Color.White)
+            .enabled(this.canStartCore())
+            .opacity(this.canStartCore() ? 1 : 0.4)
+            .onClick((): void => {
+              if (this.onCoreStart !== undefined) {
+                this.onCoreStart();
+              }
+            })
+          Button('Stop Core')
+            .type(ButtonType.Normal)
+            .height(40)
+            .borderRadius(8)
+            .layoutWeight(1)
+            .backgroundColor('#C62828')
+            .fontColor(Color.White)
+            .enabled(this.canStopCore())
+            .opacity(this.canStopCore() ? 1 : 0.4)
+            .onClick((): void => {
+              if (this.onCoreStop !== undefined) {
+                this.onCoreStop();
+              }
+            })
+        }
+        .width('100%')
+
+        Text(this.coreStatusText())
           .fontSize(12)
           .fontColor('#5C6470')
           .width('100%')
