@@ -166,3 +166,11 @@ export interface SubscriptionState {
   subscriptions: SubscriptionProfile[];
   activeId: string;
 }
+
+export interface GeneratedConfig {
+  path: string;
+  controllerUrl: string;
+  controllerSecret: string;
+  mixedPort: number;
+  timestamp: string;
+}

@@ -13,6 +13,7 @@ import { MihomoApiService } from '../services/MihomoApiService';
 import { MihomoWsSubscription } from '../services/MihomoWsService';
 import { VpnService } from '../services/VpnService';
 import { SubscriptionStore } from '../services/SubscriptionStore';
+import { MihomoConfigService } from '../services/MihomoConfigService';
 import { HomePage } from './HomePage';
 import { ProxiesPage } from './ProxiesPage';
 import { SettingsPage } from './SettingsPage';
@@ -67,6 +68,7 @@ struct Index {
   private opVersion: number = 0;
   private vpnService: VpnService = new VpnService();
   private subStore?: SubscriptionStore;
+  private configService?: MihomoConfigService;
 
   aboutToAppear(): void {
     const context = this.getAbilityContext();
@@ -77,6 +79,7 @@ struct Index {
     this.selectedPage = settings.selectedPage;
     this.api = new MihomoApiService(settings.controller);
     this.subStore = new SubscriptionStore(context);
+    this.configService = new MihomoConfigService(context);
     const compactListener = this.getUIContext().getMediaQuery().matchMediaSync(COMPACT_QUERY);
     this.compactListener = compactListener;
     this.compactLayout = compactListener.matches;
@@ -178,7 +181,16 @@ struct Index {
         } else if (this.selectedPage === 'providers') {
           ProvidersPage({ compact: this.compactLayout })
         } else if (this.selectedPage === 'subscriptions') {
-          SubscriptionPage({ store: this.subStore, compact: this.compactLayout })
+          SubscriptionPage({
+            store: this.subStore,
+            configService: this.configService,
+            compact: this.compactLayout,
+            onConfigGenerated: (url: string, secret: string): void => {
+              this.controllerUrl = url;
+              this.controllerSecret = secret;
+              this.api = new MihomoApiService({ baseUrl: url, secret: secret });
+            }
+          })
         } else if (this.selectedPage === 'profiles') {
           ProfilesPage({ compact: this.compactLayout })
         } else if (this.selectedPage === 'connections') {

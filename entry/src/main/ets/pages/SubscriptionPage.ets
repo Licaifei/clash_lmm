@@ -1,5 +1,8 @@
 import { SubscriptionStore } from '../services/SubscriptionStore';
+import { common } from '@kit.AbilityKit';
+import { MihomoConfigService } from '../services/MihomoConfigService';
 import { SubscriptionProfile } from '../models/MihomoModels';
+import { AppConfigStore, AppSettings } from '../services/AppConfigStore';
 import { BasePage } from '../components/BasePage';
 import { SectionHeader } from '../components/SectionHeader';
 import { EmptyState } from '../components/EmptyState';
@@ -8,7 +11,9 @@ import { ErrorBanner } from '../components/ErrorBanner';
 @Component
 export struct SubscriptionPage {
   store?: SubscriptionStore;
+  configService?: MihomoConfigService;
   @Prop compact: boolean = false;
+  onConfigGenerated?: (url: string, secret: string) => void;
 
   @State private profiles: SubscriptionProfile[] = [];
   @State private activeId: string = '';
@@ -17,6 +22,8 @@ export struct SubscriptionPage {
   @State private error: string = '';
   @State private loading: boolean = false;
   @State private adding: boolean = false;
+  @State private generating: boolean = false;
+  @State private genResult: string = '';
 
   aboutToAppear(): void {
     this.refreshList();
@@ -103,6 +110,40 @@ export struct SubscriptionPage {
     }
   }
 
+  private handleGenerate(): void {
+    if (this.store === undefined || this.configService === undefined) {
+      return;
+    }
+    this.generating = true;
+    this.error = '';
+    this.genResult = '';
+    try {
+      const ctx = this.getAppContext();
+      if (ctx === undefined) {
+        this.error = 'Failed to get application context';
+        this.generating = false;
+        return;
+      }
+      const configStore = new AppConfigStore(ctx);
+      const config = this.configService.generate(this.store, configStore);
+      this.genResult = 'Config generated: ' + config.path;
+      if (this.onConfigGenerated !== undefined) {
+        this.onConfigGenerated(config.controllerUrl, config.controllerSecret);
+      }
+    } catch (err) {
+      this.error = this.formatError(err);
+    }
+    this.generating = false;
+  }
+
+  private getAppContext(): common.UIAbilityContext | undefined {
+    const ctx = this.getUIContext().getHostContext();
+    if (ctx === undefined) {
+      return undefined;
+    }
+    return ctx as common.UIAbilityContext;
+  }
+
   private formatError(err: Object): string {
     if (err instanceof Error) {
       return err.message;
@@ -159,6 +200,31 @@ export struct SubscriptionPage {
           Text('Fetching subscription...')
             .fontSize(12)
             .fontColor('#5C6470')
+        }
+
+        SectionHeader({ title: 'Config Generation' })
+
+        Button('Generate Config')
+          .type(ButtonType.Normal)
+          .height(40)
+          .borderRadius(8)
+          .width(this.compact ? '100%' : 200)
+          .backgroundColor('#2E7D32')
+          .fontColor(Color.White)
+          .enabled(!this.generating)
+          .onClick((): void => {
+            this.handleGenerate();
+          })
+
+        if (this.generating) {
+          Text('Generating config...')
+            .fontSize(12)
+            .fontColor('#5C6470')
+        }
+        if (this.genResult.length > 0) {
+          Text(this.genResult)
+            .fontSize(12)
+            .fontColor('#2E7D32')
         }
 
         SectionHeader({ title: 'Saved (' + this.profiles.length + ')' })
