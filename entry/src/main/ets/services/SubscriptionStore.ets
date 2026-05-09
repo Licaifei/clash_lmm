@@ -2,7 +2,6 @@ import { common } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
 import fileIo from '@ohos.file.fs';
 import { http } from '@kit.NetworkKit';
-import { BusinessError } from '@kit.BasicServicesKit';
 import { SubscriptionProfile, SubscriptionState } from '../models/MihomoModels';
 
 const STORE_NAME = 'mihomo_subscriptions';
@@ -22,8 +21,14 @@ export class SubscriptionStore {
   }
 
   loadState(): SubscriptionState {
-    const raw = this.store.getSync(KEY_PROFILES, '[]') as string;
-    let activeId = this.store.getSync(KEY_ACTIVE_ID, '') as string;
+    let raw = '[]';
+    let activeId = '';
+    try {
+      raw = this.store.getSync(KEY_PROFILES, '[]') as string;
+      activeId = this.store.getSync(KEY_ACTIVE_ID, '') as string;
+    } catch (_err) {
+      return { subscriptions: [], activeId: '' };
+    }
     let profiles: SubscriptionProfile[];
     try {
       const parsed = JSON.parse(raw) as Object;
@@ -176,16 +181,31 @@ export class SubscriptionStore {
 
   private contentPath(id: string): string {
     const dir = this.context.filesDir + '/subscriptions';
-    fileIo.mkdirSync(dir, true);
+    try {
+      fileIo.mkdirSync(dir, true);
+    } catch (_err) {
+      throw new Error('Failed to prepare subscription storage');
+    }
     return dir + '/' + id + '.yaml';
   }
 
   private writeContent(id: string, content: string): void {
     const path = this.contentPath(id);
-    const f = fileIo.openSync(path, fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC | fileIo.OpenMode.WRITE_ONLY);
-    const fd = f.fd;
-    fileIo.writeSync(fd, content);
-    fileIo.closeSync(fd);
+    let fd = -1;
+    try {
+      const f = fileIo.openSync(path, fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC | fileIo.OpenMode.WRITE_ONLY);
+      fd = f.fd;
+      fileIo.writeSync(fd, content);
+    } catch (_err) {
+      throw new Error('Failed to write subscription content');
+    } finally {
+      if (fd >= 0) {
+        try {
+          fileIo.closeSync(fd);
+        } catch (_err) {
+        }
+      }
+    }
   }
 
   private deleteContent(id: string): void {
@@ -212,9 +232,14 @@ export class SubscriptionStore {
       });
       const status = response.responseCode;
       if (status < 200 || status >= 300) {
-        throw new Error('HTTP ' + status + ': ' + (response.result as string ?? ''));
+        throw new Error('HTTP ' + status);
       }
       return response.result as string;
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith('HTTP ')) {
+        throw err;
+      }
+      throw new Error('Failed to fetch subscription');
     } finally {
       req.destroy();
     }
@@ -241,9 +266,13 @@ export class SubscriptionStore {
   }
 
   private saveState(state: SubscriptionState): void {
-    this.store.putSync(KEY_PROFILES, JSON.stringify(state.subscriptions));
-    this.store.putSync(KEY_ACTIVE_ID, state.activeId);
-    this.store.flush();
+    try {
+      this.store.putSync(KEY_PROFILES, JSON.stringify(state.subscriptions));
+      this.store.putSync(KEY_ACTIVE_ID, state.activeId);
+      this.store.flush();
+    } catch (_err) {
+      throw new Error('Failed to save subscription metadata');
+    }
   }
 
   private newId(): string {

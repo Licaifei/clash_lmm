@@ -336,6 +336,11 @@ export class MihomoApiService {
         return undefined as T;
       }
       return JSON.parse(raw) as T;
+    } catch (err) {
+      if (err instanceof MihomoApiError) {
+        throw err;
+      }
+      throw new MihomoApiError(0, 'Mihomo API request failed');
     } finally {
       request.destroy();
     }

@@ -69,7 +69,7 @@ struct Index {
   private subStore?: SubscriptionStore;
 
   aboutToAppear(): void {
-    const context = getContext(this) as common.UIAbilityContext;
+    const context = this.getAbilityContext();
     const store = new AppConfigStore(context);
     const settings = store.load();
     this.controllerUrl = settings.controller.baseUrl;
@@ -77,9 +77,10 @@ struct Index {
     this.selectedPage = settings.selectedPage;
     this.api = new MihomoApiService(settings.controller);
     this.subStore = new SubscriptionStore(context);
-    this.compactListener = mediaquery.matchMediaSync(COMPACT_QUERY);
-    this.compactLayout = this.compactListener.matches;
-    this.compactListener.on('change', (result: mediaquery.MediaQueryResult): void => {
+    const compactListener = this.getUIContext().getMediaQuery().matchMediaSync(COMPACT_QUERY);
+    this.compactListener = compactListener;
+    this.compactLayout = compactListener.matches;
+    compactListener.on('change', (result: mediaquery.MediaQueryResult): void => {
       this.compactLayout = result.matches;
     });
   }
@@ -392,7 +393,7 @@ struct Index {
   }
 
   private persistSettings(): void {
-    const context = getContext(this) as common.UIAbilityContext;
+    const context = this.getAbilityContext();
     const store = new AppConfigStore(context);
     const settings: AppSettings = {
       controller: this.currentControllerConfig(),
@@ -400,6 +401,14 @@ struct Index {
       selectedPage: this.selectedPage
     };
     store.save(settings);
+  }
+
+  private getAbilityContext(): common.UIAbilityContext {
+    const context = this.getUIContext().getHostContext();
+    if (context === undefined) {
+      throw new Error('Ability context is not available');
+    }
+    return context as common.UIAbilityContext;
   }
 
   private formatError(error: Object): string {

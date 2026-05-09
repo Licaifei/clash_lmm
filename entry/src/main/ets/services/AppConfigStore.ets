@@ -27,19 +27,32 @@ export class AppConfigStore {
   load(): AppSettings {
     return {
       controller: {
-        baseUrl: this.store.getSync('controller.baseUrl', DEFAULT_SETTINGS.controller.baseUrl) as string,
-        secret: this.store.getSync('controller.secret', DEFAULT_SETTINGS.controller.secret) as string
+        baseUrl: this.readString('controller.baseUrl', DEFAULT_SETTINGS.controller.baseUrl),
+        secret: this.readString('controller.secret', DEFAULT_SETTINGS.controller.secret)
       },
-      themeMode: this.store.getSync('themeMode', DEFAULT_SETTINGS.themeMode) as string,
-      selectedPage: this.store.getSync('selectedPage', DEFAULT_SETTINGS.selectedPage) as string
+      themeMode: this.readString('themeMode', DEFAULT_SETTINGS.themeMode),
+      selectedPage: this.readString('selectedPage', DEFAULT_SETTINGS.selectedPage)
     };
   }
 
   save(settings: AppSettings): void {
-    this.store.putSync('controller.baseUrl', settings.controller.baseUrl);
-    this.store.putSync('controller.secret', settings.controller.secret);
-    this.store.putSync('themeMode', settings.themeMode);
-    this.store.putSync('selectedPage', settings.selectedPage);
-    this.store.flush();
+    try {
+      this.store.putSync('controller.baseUrl', settings.controller.baseUrl);
+      this.store.putSync('controller.secret', settings.controller.secret);
+      this.store.putSync('themeMode', settings.themeMode);
+      this.store.putSync('selectedPage', settings.selectedPage);
+      this.store.flush();
+    } catch (_err) {
+      throw new Error('Failed to save app settings');
+    }
+  }
+
+  private readString(key: string, fallback: string): string {
+    try {
+      const value = this.store.getSync(key, fallback);
+      return typeof value === 'string' ? value : fallback;
+    } catch (_err) {
+      return fallback;
+    }
   }
 }
