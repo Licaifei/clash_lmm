@@ -2,11 +2,11 @@
   "string": [
     {
       "name": "module_desc",
-      "value": "module description"
+      "value": "HarmonyOS Mihomo controller UI"
     },
     {
       "name": "EntryAbility_desc",
-      "value": "description"
+      "value": "Main ability"
     },
     {
       "name": "EntryAbility_label",
