@@ -190,3 +190,12 @@ export interface CoreInstallInfo {
   sandboxPath: string;
   lastError: string;
 }
+
+export type VpnTunnelState =
+  'stopped' | 'requestingPermission' | 'startingTunnel' | 'active' | 'stopping' | 'failed';
+
+export interface VpnTunnelResult {
+  success: boolean;
+  error?: string;
+  state: VpnTunnelState;
+}

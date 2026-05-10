@@ -11,7 +11,7 @@ import {
 import { AppConfigStore, AppSettings } from '../services/AppConfigStore';
 import { MihomoApiService } from '../services/MihomoApiService';
 import { MihomoWsSubscription } from '../services/MihomoWsService';
-import { VpnService } from '../services/VpnService';
+import { VpnRuntime } from '../services/VpnRuntime';
 import { SubscriptionStore } from '../services/SubscriptionStore';
 import { MihomoConfigService } from '../services/MihomoConfigService';
 import { MihomoCoreRuntime } from '../services/MihomoCoreRuntime';
@@ -60,7 +60,7 @@ struct Index {
   @State private proxyGroups: string[] = [];
   @State private calculatedProxies: CalculatedProxies | null = null;
   @State private lastError: string = '';
-  @State private vpnState: string = 'idle';
+  @State private vpnState: string = 'stopped';
   @State private coreState: string = 'stopped';
   @State private compactLayout: boolean = false;
 
@@ -68,7 +68,7 @@ struct Index {
   private trafficWs: MihomoWsSubscription = new MihomoWsSubscription();
   private compactListener?: mediaquery.MediaQueryListener;
   private opVersion: number = 0;
-  private vpnService: VpnService = new VpnService();
+  private vpnRuntime: VpnRuntime = new VpnRuntime();
   private subStore?: SubscriptionStore;
   private configService?: MihomoConfigService;
   private coreRuntime?: MihomoCoreRuntime;
@@ -388,6 +388,11 @@ struct Index {
     if (this.coreRuntime === undefined) {
       return;
     }
+    if (this.vpnState === 'active' || this.vpnState === 'requestingPermission' ||
+      this.vpnState === 'startingTunnel' || this.vpnState === 'failed') {
+      await this.vpnRuntime.stop();
+      this.vpnState = this.vpnRuntime.getState();
+    }
     const result = await this.coreRuntime.stop();
     this.coreState = this.coreRuntime.getState();
     if (!result.success && result.error !== undefined) {
@@ -396,16 +401,18 @@ struct Index {
   }
 
   private async startVpn(): Promise<void> {
-    const result = await this.vpnService.start();
-    this.vpnState = this.vpnService.getState();
+    const isCoreRunning = this.coreRuntime !== undefined &&
+      this.coreRuntime.getState() === 'running';
+    const result = await this.vpnRuntime.start(isCoreRunning);
+    this.vpnState = this.vpnRuntime.getState();
     if (!result.success && result.error !== undefined) {
       this.lastError = result.error;
     }
   }
 
   private async stopVpn(): Promise<void> {
-    const result = await this.vpnService.stop();
-    this.vpnState = this.vpnService.getState();
+    const result = await this.vpnRuntime.stop();
+    this.vpnState = this.vpnRuntime.getState();
     if (!result.success && result.error !== undefined) {
       this.lastError = result.error;
     }

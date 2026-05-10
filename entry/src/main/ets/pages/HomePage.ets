@@ -17,7 +17,7 @@ export struct HomePage {
   onConnect?: () => void;
   onRefresh?: () => void;
   onDisconnect?: () => void;
-  @Prop vpnState: string = 'idle';
+  @Prop vpnState: string = 'stopped';
   onVpnStart?: () => void;
   onVpnStop?: () => void;
   @Prop coreState: string = 'stopped';
@@ -70,30 +70,34 @@ export struct HomePage {
   }
 
   private vpnStatusText(): string {
-    if (this.vpnState === 'idle') {
-      return 'VPN Extension: Stopped';
+    if (this.vpnState === 'stopped') {
+      return 'VPN: Stopped';
     }
-    if (this.vpnState === 'starting') {
-      return 'VPN Extension: Starting...';
+    if (this.vpnState === 'requestingPermission') {
+      return 'VPN: Requesting permission...';
     }
-    if (this.vpnState === 'extensionActive') {
-      return 'VPN Extension: Active';
+    if (this.vpnState === 'startingTunnel') {
+      return 'VPN: Starting tunnel...';
+    }
+    if (this.vpnState === 'active') {
+      return 'VPN: Active';
     }
     if (this.vpnState === 'stopping') {
-      return 'VPN Extension: Stopping...';
+      return 'VPN: Stopping...';
     }
-    if (this.vpnState === 'error') {
-      return 'VPN Extension: Error';
+    if (this.vpnState === 'failed') {
+      return 'VPN: Failed';
     }
-    return 'VPN Extension: Stopped';
+    return 'VPN: Stopped';
   }
 
   private canStartVpn(): boolean {
-    return this.vpnState === 'idle' || this.vpnState === 'error';
+    return this.vpnState === 'stopped' || this.vpnState === 'failed';
   }
 
   private canStopVpn(): boolean {
-    return this.vpnState === 'extensionActive' || this.vpnState === 'starting';
+    return this.vpnState === 'active' || this.vpnState === 'requestingPermission' ||
+      this.vpnState === 'startingTunnel' || this.vpnState === 'failed';
   }
 
   private coreStatusText(): string {
@@ -285,7 +289,7 @@ export struct HomePage {
         }
 
         Row({ space: 12 }) {
-          Button('Start VPN Extension')
+          Button('Start VPN')
             .type(ButtonType.Normal)
             .height(40)
             .borderRadius(8)
@@ -299,7 +303,7 @@ export struct HomePage {
                 this.onVpnStart();
               }
             })
-          Button('Stop VPN Extension')
+          Button('Stop VPN')
             .type(ButtonType.Normal)
             .height(40)
             .borderRadius(8)
