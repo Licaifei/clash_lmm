@@ -14,6 +14,7 @@ export struct SubscriptionPage {
   configService?: MihomoConfigService;
   @Prop compact: boolean = false;
   onConfigGenerated?: (url: string, secret: string) => void;
+  onSubscriptionChanged?: () => void;
 
   @State private profiles: SubscriptionProfile[] = [];
   @State private activeId: string = '';
@@ -92,9 +93,13 @@ export struct SubscriptionPage {
     if (this.store === undefined) {
       return;
     }
+    const wasActive = id === this.activeId;
     this.store.deleteSubscription(id);
     this.refreshList();
     this.error = '';
+    if (wasActive && this.onSubscriptionChanged !== undefined) {
+      this.onSubscriptionChanged();
+    }
   }
 
   private handleSelect(id: string): void {
@@ -105,6 +110,9 @@ export struct SubscriptionPage {
       this.store.selectSubscription(id);
       this.activeId = id;
       this.error = '';
+      if (this.onSubscriptionChanged !== undefined) {
+        this.onSubscriptionChanged();
+      }
     } catch (err) {
       this.error = this.formatError(err);
     }

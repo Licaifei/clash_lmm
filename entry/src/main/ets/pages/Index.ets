@@ -6,12 +6,15 @@ import {
   ControllerConfig,
   MihomoBaseConfig,
   MihomoVersion,
-  TrafficItem
+  TrafficItem,
+  VpnFlowState,
+  VpnFlowError
 } from '../models/MihomoModels';
 import { AppConfigStore, AppSettings } from '../services/AppConfigStore';
 import { MihomoApiService } from '../services/MihomoApiService';
 import { MihomoWsSubscription } from '../services/MihomoWsService';
 import { VpnRuntime } from '../services/VpnRuntime';
+import { VpnStartupCoordinator } from '../services/VpnStartupCoordinator';
 import { SubscriptionStore } from '../services/SubscriptionStore';
 import { MihomoConfigService } from '../services/MihomoConfigService';
 import { MihomoCoreRuntime } from '../services/MihomoCoreRuntime';
@@ -60,8 +63,10 @@ struct Index {
   @State private proxyGroups: string[] = [];
   @State private calculatedProxies: CalculatedProxies | null = null;
   @State private lastError: string = '';
-  @State private vpnState: string = 'stopped';
-  @State private coreState: string = 'stopped';
+  @State private vpnFlowState: VpnFlowState = 'noSubscription';
+  @State private vpnFlowError: VpnFlowError | null = null;
+  @State private vpnNeedsCleanup: boolean = false;
+  @State private devSectionExpanded: boolean = false;
   @State private compactLayout: boolean = false;
 
   private api?: MihomoApiService;
@@ -69,6 +74,7 @@ struct Index {
   private compactListener?: mediaquery.MediaQueryListener;
   private opVersion: number = 0;
   private vpnRuntime: VpnRuntime = new VpnRuntime();
+  private coordinator: VpnStartupCoordinator = new VpnStartupCoordinator();
   private subStore?: SubscriptionStore;
   private configService?: MihomoConfigService;
   private coreRuntime?: MihomoCoreRuntime;
@@ -85,7 +91,7 @@ struct Index {
     this.configService = new MihomoConfigService(context);
     this.coreRuntime = new MihomoCoreRuntime(context);
     this.coreRuntime.initRuntime();
-    this.coreState = this.coreRuntime.getState();
+    this.syncReady();
     const compactListener = this.getUIContext().getMediaQuery().matchMediaSync(COMPACT_QUERY);
     this.compactListener = compactListener;
     this.compactLayout = compactListener.matches;
@@ -149,6 +155,9 @@ struct Index {
       Column() {
         if (this.selectedPage === 'home') {
           HomePage({
+            vpnFlowState: this.vpnFlowState,
+            vpnFlowError: this.vpnFlowError,
+            vpnNeedsCleanup: this.vpnNeedsCleanup,
             connectionState: this.connectionState,
             versionText: this.versionText,
             modeText: this.modeText,
@@ -158,6 +167,16 @@ struct Index {
             proxyCount: this.proxyCount,
             lastError: this.lastError,
             compact: this.compactLayout,
+            devSectionExpanded: this.devSectionExpanded,
+            onStartVpn: (): void => {
+              this.handleStartVpn();
+            },
+            onStopVpn: (): void => {
+              this.handleStopVpn();
+            },
+            onDismissError: (): void => {
+              this.vpnFlowError = null;
+            },
             onConnect: (): void => {
               this.connect();
             },
@@ -167,19 +186,8 @@ struct Index {
             onDisconnect: (): void => {
               this.disconnect();
             },
-            vpnState: this.vpnState,
-            onVpnStart: (): void => {
-              this.startVpn();
-            },
-            onVpnStop: (): void => {
-              this.stopVpn();
-            },
-            coreState: this.coreState,
-            onCoreStart: (): void => {
-              this.startCore();
-            },
-            onCoreStop: (): void => {
-              this.stopCore();
+            onToggleDevSection: (): void => {
+              this.devSectionExpanded = !this.devSectionExpanded;
             }
           })
         } else if (this.selectedPage === 'proxies') {
@@ -202,6 +210,9 @@ struct Index {
               this.controllerUrl = url;
               this.controllerSecret = secret;
               this.api = new MihomoApiService({ baseUrl: url, secret: secret });
+            },
+            onSubscriptionChanged: (): void => {
+              this.syncReady();
             }
           })
         } else if (this.selectedPage === 'profiles') {
@@ -260,36 +271,8 @@ struct Index {
       this.connectionState !== ConnectionState.FAILED) {
       return;
     }
-    this.connectionState = ConnectionState.CONNECTING;
-    this.lastError = '';
-    const token = ++this.opVersion;
-    try {
-      const config = this.currentControllerConfig();
-      this.api = new MihomoApiService(config);
-      const responses = await Promise.all([
-        this.api.getVersion(),
-        this.api.getBaseConfig(),
-        this.api.calcuProxies()
-      ]);
-      if (token !== this.opVersion) {
-        return;
-      }
-      const version = responses[0];
-      const baseConfig = responses[1];
-      const proxies = responses[2];
-      this.applyVersion(version);
-      this.applyBaseConfig(baseConfig);
-      this.applyProxies(proxies);
-      this.startTraffic(config);
-      this.connectionState = ConnectionState.CONNECTED;
-      this.persistSettings();
-    } catch (error) {
-      if (token !== this.opVersion) {
-        return;
-      }
-      this.connectionState = ConnectionState.FAILED;
-      this.lastError = this.formatError(error);
-    }
+    this.api = new MihomoApiService(this.currentControllerConfig());
+    await this.fetchDashboard();
   }
 
   private async refresh(): Promise<void> {
@@ -362,59 +345,164 @@ struct Index {
     this.calculatedProxies = proxies;
   }
 
-  private async startCore(): Promise<void> {
-    if (this.coreRuntime === undefined || this.configService === undefined) {
+  private syncReady(): void {
+    if (this.vpnFlowState === 'active' || this.vpnFlowState === 'preparing' ||
+      this.vpnFlowState === 'coreStarting' || this.vpnFlowState === 'requestingPermission' ||
+      this.vpnFlowState === 'stopping' || this.vpnNeedsCleanup) {
       return;
     }
-    const result = await this.coreRuntime.start(this.configService);
-    this.coreState = this.coreRuntime.getState();
-    if (!result.success && result.error !== undefined) {
-      this.lastError = result.error;
+    if (this.subStore === undefined) {
+      this.vpnFlowState = 'noSubscription';
+      return;
     }
-    if (result.success) {
-      const generated = this.configService.loadGeneratedConfig();
-      if (generated !== null) {
-        this.controllerUrl = generated.controllerUrl;
-        this.controllerSecret = generated.controllerSecret;
-        this.api = new MihomoApiService({
-          baseUrl: generated.controllerUrl,
-          secret: generated.controllerSecret
-        });
-      }
-    }
+    const active = this.subStore.getActive();
+    this.vpnFlowState = active !== null ? 'ready' : 'noSubscription';
+    this.vpnFlowError = null;
   }
 
-  private async stopCore(): Promise<void> {
+  private async handleStartVpn(): Promise<void> {
+    if (this.vpnFlowState === 'active' || this.vpnFlowState === 'preparing' ||
+      this.vpnFlowState === 'coreStarting' || this.vpnFlowState === 'requestingPermission' ||
+      this.vpnFlowState === 'stopping') {
+      return;
+    }
+    if (this.subStore === undefined || this.configService === undefined ||
+      this.coreRuntime === undefined) {
+      return;
+    }
+    this.coordinator.cancel();
+    this.vpnFlowError = null;
+    this.vpnNeedsCleanup = false;
+
+    const ctx = this.getAbilityContext();
+    const configStore = new AppConfigStore(ctx);
+
+    const result = await this.coordinator.startFlow(
+      this.subStore,
+      this.configService,
+      configStore,
+      this.coreRuntime,
+      this.vpnRuntime,
+      (state: VpnFlowState): void => {
+        this.vpnFlowState = state;
+      }
+    );
+
+    if (!result.success) {
+      this.vpnFlowState = 'failed';
+      this.vpnFlowError = result.error ?? { phase: 'core', message: 'Unknown error' };
+      if (result.cleanupFailed === true) {
+        this.vpnNeedsCleanup = true;
+      }
+      return;
+    }
+
+    const generated = this.configService.loadGeneratedConfig();
+    if (generated !== null) {
+      this.controllerUrl = generated.controllerUrl;
+      this.controllerSecret = generated.controllerSecret;
+      this.api = new MihomoApiService({
+        baseUrl: generated.controllerUrl,
+        secret: generated.controllerSecret
+      });
+    }
+    const dashboardOk = await this.fetchDashboard();
+    if (!dashboardOk) {
+      const cleanupResult = await this.coordinator.stopFlow(
+        this.coreRuntime!,
+        this.vpnRuntime,
+        (_state: VpnFlowState): void => {}
+      );
+      ++this.opVersion;
+      this.trafficWs.close();
+      this.uploadRate = 0;
+      this.downloadRate = 0;
+      this.connectionState = ConnectionState.DISCONNECTED;
+      if (!cleanupResult.success) {
+        this.vpnNeedsCleanup = true;
+        this.vpnFlowState = 'failed';
+        this.vpnFlowError = cleanupResult.error ??
+          { phase: 'core', message: 'Cleanup after dashboard failure failed' };
+      } else {
+        this.vpnFlowState = 'failed';
+        this.vpnFlowError = { phase: 'dashboard', message: this.lastError.length > 0 ? this.lastError : 'Dashboard connection failed' };
+      }
+      return;
+    }
+    this.vpnFlowState = 'active';
+  }
+
+  private async handleStopVpn(): Promise<void> {
+    if (this.vpnFlowState !== 'active' && this.vpnFlowState !== 'failed') {
+      return;
+    }
     if (this.coreRuntime === undefined) {
       return;
     }
-    if (this.vpnState === 'active' || this.vpnState === 'requestingPermission' ||
-      this.vpnState === 'startingTunnel' || this.vpnState === 'failed') {
-      await this.vpnRuntime.stop();
-      this.vpnState = this.vpnRuntime.getState();
+    this.coordinator.cancel();
+    this.vpnFlowError = null;
+    this.vpnNeedsCleanup = false;
+
+    ++this.opVersion;
+    this.trafficWs.close();
+    this.uploadRate = 0;
+    this.downloadRate = 0;
+
+    const result = await this.coordinator.stopFlow(
+      this.coreRuntime,
+      this.vpnRuntime,
+      (state: VpnFlowState): void => {
+        this.vpnFlowState = state;
+      }
+    );
+
+    if (!result.success) {
+      this.vpnNeedsCleanup = true;
+      this.vpnFlowState = 'failed';
+      this.vpnFlowError = result.error ?? { phase: 'core', message: 'Stop failed' };
+      return;
     }
-    const result = await this.coreRuntime.stop();
-    this.coreState = this.coreRuntime.getState();
-    if (!result.success && result.error !== undefined) {
-      this.lastError = result.error;
-    }
+
+    this.vpnFlowState = 'ready';
+    this.connectionState = ConnectionState.DISCONNECTED;
+    this.versionText = '-';
+    this.modeText = '-';
+    this.proxyGroupCount = 0;
+    this.proxyCount = 0;
+    this.lastError = '';
   }
 
-  private async startVpn(): Promise<void> {
-    const isCoreRunning = this.coreRuntime !== undefined &&
-      this.coreRuntime.getState() === 'running';
-    const result = await this.vpnRuntime.start(isCoreRunning);
-    this.vpnState = this.vpnRuntime.getState();
-    if (!result.success && result.error !== undefined) {
-      this.lastError = result.error;
+  private async fetchDashboard(): Promise<boolean> {
+    if (this.api === undefined) {
+      return false;
     }
-  }
-
-  private async stopVpn(): Promise<void> {
-    const result = await this.vpnRuntime.stop();
-    this.vpnState = this.vpnRuntime.getState();
-    if (!result.success && result.error !== undefined) {
-      this.lastError = result.error;
+    this.connectionState = ConnectionState.CONNECTING;
+    this.lastError = '';
+    const token = ++this.opVersion;
+    try {
+      const config = this.currentControllerConfig();
+      const responses = await Promise.all([
+        this.api.getVersion(),
+        this.api.getBaseConfig(),
+        this.api.calcuProxies()
+      ]);
+      if (token !== this.opVersion) {
+        return false;
+      }
+      this.applyVersion(responses[0]);
+      this.applyBaseConfig(responses[1]);
+      this.applyProxies(responses[2]);
+      this.startTraffic(config);
+      this.connectionState = ConnectionState.CONNECTED;
+      this.persistSettings();
+      return true;
+    } catch (error) {
+      if (token !== this.opVersion) {
+        return false;
+      }
+      this.connectionState = ConnectionState.FAILED;
+      this.lastError = this.formatError(error);
+      return false;
     }
   }
 

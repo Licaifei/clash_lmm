@@ -199,3 +199,21 @@ export interface VpnTunnelResult {
   error?: string;
   state: VpnTunnelState;
 }
+
+export type VpnFlowState =
+  'noSubscription' | 'ready' | 'preparing' | 'coreStarting' |
+  'requestingPermission' | 'active' | 'stopping' | 'failed';
+
+export interface VpnFlowError {
+  phase: string;
+  message: string;
+}
+
+export interface VpnFlowResult {
+  success: boolean;
+  state: VpnFlowState;
+  error?: VpnFlowError;
+  cleanupFailed?: boolean;
+  controllerUrl?: string;
+  controllerSecret?: string;
+}
